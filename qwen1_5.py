@@ -12,7 +12,6 @@ from transformers import AutoTokenizer
 import numpy as np
 import time
 import argparse
-import pdb
 
 
 #convert sail_dtype to numpy dtype
@@ -46,10 +45,10 @@ class Qwen1_5:
         self.dev_id = self.net.get_device_ids()[0]
 
         self.EOS = self.tokenizer.eos_token_id
-        self.NUM_LAYERS = (len(self.graph_names) - 2) // 2
+        self.NUM_LAYERS = (len(self.graph_names) - 5) // 2
         _, self.SEQLEN, self.HIDDEN_SIZE = self.first_hidden_input_shape = self.net.get_input_shape("block_0", 0)
 
-        self.is_greedy_sample = False
+        self.is_greedy_sample = True
         self.name_embed = "embedding"
         self.name_embed_cache = "embedding_cache"
         self.name_lm = "lm_head"
@@ -113,8 +112,8 @@ class Qwen1_5:
         self.lm_output = self.init_sail_tensor(self.name_lm, 0, None, False)
 
         # sample tensor
-        # self.sample_input = self.init_sail_tensor(self.name_sample, 0)
-        # self.sample_output = self.init_sail_tensor(self.name_sample, 0, None, False)
+        self.sample_input = self.init_sail_tensor(self.name_sample, 0)
+        self.sample_output = self.init_sail_tensor(self.name_sample, 0, None, False)
 
 
     def init_sail_tensor(self, name, tensor_idx, shape=None, is_input=True):
@@ -130,27 +129,22 @@ class Qwen1_5:
             dict
         """
         tensor = {}
-        
         if is_input:
-            print('init input name is :', name)
             tensor["name"] = self.net.get_input_names(name)[tensor_idx]
             tensor["shape"] = self.net.get_input_shape(name, tensor_idx) if shape is None else shape
             tensor["dtype"] = self.net.get_input_dtype(name, tensor_idx)
             tensor["data"] = sail.Tensor(self.handle, tensor["shape"], tensor["dtype"], False, True)
-            print('---------is input tensor data-----------')
         else:
-            print('init output name is :', name)
             tensor["name"] = self.net.get_output_names(name)[tensor_idx]
             tensor["shape"] = self.net.get_output_shape(name, tensor_idx) if shape is None else shape
             tensor["dtype"] = self.net.get_output_dtype(name, tensor_idx)
-            tensor["data"] = sail.Tensor(self.handle, tensor["shape"], tensor["dtype"], False, True)
-            print('************output tensor data*********')
+            tensor["data"] = sail.Tensor(self.handle, tensor["shape"], tensor["dtype"], False, True) 
+        
         return tensor
 
 
     def forward_first(self, token):
         # Keep
-        test_time1 = time.time()
         input_ids = np.zeros(self.SEQLEN, type_convert(self.first_embed_input["dtype"]))
         input_ids[:min(self.SEQLEN, len(token))] = token
         input_ids = input_ids.reshape(1, -1)
@@ -158,22 +152,19 @@ class Qwen1_5:
         position_id = np.zeros(self.SEQLEN, type_convert(self.first_pid["dtype"])) 
         for i in range(self.token_length):
             position_id[i] = i
-        test_time2 = time.time()
-        print('first stage',test_time2-test_time1)
+            
         attention_mask = np.ones(self.SEQLEN*self.SEQLEN, type_convert(self.first_attention["dtype"])) * (-10000.0)
         for i in range(self.token_length):
             for j in range(self.SEQLEN):
                 if (j <= i):
                     attention_mask[i*self.SEQLEN + j] = 0
-        test_time3 = time.time()
-        print('second stage',test_time3-test_time2)
+        
         # embedding
         self.first_embed_input["data"].update_data(input_ids)
         input_embed_tensors = {0: self.first_embed_input["data"]}
         output_embed_tensors = {0: self.first_embed_output["data"]}
         self.net.process(self.name_embed, input_embed_tensors, output_embed_tensors)
-        test_time4 = time.time()
-        print('4-3',test_time4-test_time3)
+
         # blocks
         self.first_hidden_tensor = self.first_embed_output["data"]
         self.first_hidden_tensor.reshape(self.first_hidden_input["shape"])
@@ -183,15 +174,12 @@ class Qwen1_5:
         input_blocks_tensors = {0: self.first_hidden_tensor, 
                                 1: self.first_pid["data"], 
                                 2: self.first_attention["data"]}
-        test_time7 = time.time()
         for i in range(self.NUM_LAYERS):
             output_blocks_tensors = {0: self.first_hidden_tensor,
                                     1: self.past_key_output[i]["data"],
                                     2: self.past_value_output[i]["data"],}
             self.net.process(self.name_blocks[i], input_blocks_tensors, output_blocks_tensors)
-        test_time5 = time.time()
-        print('5-4',test_time5-test_time4)
-        print('7-4',test_time7-test_time4)
+        
         # lm_head
         # hidden_states 的最后一个位置的元素取出来作为 lm_head的输入
         copy_len = self.first_hidden_tensor.shape()[-1]
@@ -206,14 +194,10 @@ class Qwen1_5:
         self.net.process(self.name_lm, input_lm_tensors, output_lm_tensors)
         
         # sample
-        # input_sample_tensor = {0:self.lm_output["data"]}
-        # output_sample_tensor = {0:self.sample_output["data"]}
-        # self.net.process(self.name_sample, input_sample_tensor, output_sample_tensor)
-        # return int(self.sample_output["data"].asnumpy())
-        # breakpoint()
-        test_time6 = time.time()
-        print('6-5',test_time6-test_time5)
-        return int(self.lm_output["data"].asnumpy())
+        input_sample_tensor = {0:self.lm_output["data"]}
+        output_sample_tensor = {0:self.sample_output["data"]}
+        self.net.process(self.name_sample, input_sample_tensor, output_sample_tensor)
+        return int(self.sample_output["data"].asnumpy())
 
     # The following tokens prediction
     def forward_next(self, ):
@@ -223,7 +207,7 @@ class Qwen1_5:
         position_id = np.array(self.token_length - 1, type_convert(self.next_pid["dtype"]))
 
         # embedding
-        self.next_embed_input["data"] = self.lm_output["data"]
+        self.next_embed_input["data"] = self.sample_output["data"]
         self.next_embed_input["data"].reshape(self.next_embed_input["shape"])
 
         input_embed_tensors = {0: self.next_embed_input["data"]}
@@ -265,12 +249,10 @@ class Qwen1_5:
         self.net.process(self.name_lm, input_lm_tensors, output_lm_tensors)
 
         # sample
-        # input_sample_tensor = {0:self.lm_output["data"]}
-        # output_sample_tensor = {0:self.sample_output["data"]}
-        # self.net.process(self.name_sample, input_sample_tensor, output_sample_tensor)
-        # return int(self.sample_output["data"].asnumpy())
-        # breakpoint()
-        return int(self.lm_output["data"].asnumpy())
+        input_sample_tensor = {0:self.lm_output["data"]}
+        output_sample_tensor = {0:self.sample_output["data"]}
+        self.net.process(self.name_sample, input_sample_tensor, output_sample_tensor)
+        return int(self.sample_output["data"].asnumpy())
 
 
     def chat_stream(self, input, history):
@@ -330,7 +312,6 @@ def main(args):
     handle = sail.Handle(args.dev_id)
     tokenizer = AutoTokenizer.from_pretrained(args.token, trust_remote_code=True)
     engine = sail.EngineLLM(args.bmodel, [args.dev_id])
-    # breakpoint()
     client = Qwen1_5(handle, engine, tokenizer)
     app(client)
 
