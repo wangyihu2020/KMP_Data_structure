@@ -92,6 +92,7 @@ baseline = """
 |    SE9-8    |  yolov8_bmcv.soc  |yolov8s_opt_int8_1b.bmodel|      5.70       |      1.82       |      7.77       |      3.68       |
 |    SE9-8    |  yolov8_bmcv.soc  |yolov8s_opt_int8_4b.bmodel|      5.55       |      1.73       |      7.54       |      3.73       |
 """
+# 定义一个字典来存储表格数据
 table_data = {
     "platform": [],
     "program": [],
@@ -102,6 +103,7 @@ table_data = {
     "postprocess": []
 }
 
+# 处理基准测试字符串，提取并存储数据
 for line in baseline.strip().split("\n")[2:]:
     match = re.search(r'\|\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|', line)
     if match:
@@ -113,6 +115,7 @@ for line in baseline.strip().split("\n")[2:]:
         table_data["inference"].append(float(match.group(6)))
         table_data["postprocess"].append(float(match.group(7)))
 
+# 定义正则表达式模式，用于从C++和Python日志中提取时间数据
 patterns_cpp = {
     'decode': re.compile(r'\[.*decode time.*\]  loops:.*avg: ([\d.]+) ms'),
     'preprocess': re.compile(r'\[.*preprocess.*\]  loops:.*avg: ([\d.]+) ms'),
@@ -127,7 +130,18 @@ patterns_python = {
     'postprocess': re.compile(r'postprocess_time\(ms\): ([\d.]+)'),
 }
 
+# 根据给定的日志文本和模式提取时间数据
 def extract_times(text, patterns):
+    """
+    从给定的文本中提取时间数据。
+
+    参数:
+    text (str): 包含时间数据的日志文本。
+    patterns (dict): 匹配时间数据的正则表达式模式字典。
+
+    返回:
+    dict: 包含提取的时间数据的字典。
+    """
     results = {}
     for key, pattern in patterns.items():
         match = pattern.search(text)
@@ -135,8 +149,14 @@ def extract_times(text, patterns):
             results[key] = round(float(match.group(1)),2)
     return results
 
-
+# 定义命令行参数解析函数
 def argsparser():
+    """
+    解析命令行参数。
+
+    返回:
+    argparse.Namespace: 包含解析后参数的对象。
+    """
     parser = argparse.ArgumentParser(prog=__file__)
     parser.add_argument('--target', type=str, default='BM1684X', help='path of label json')
     parser.add_argument('--platform', type=str, default='soc', help='path of result json')
@@ -147,13 +167,14 @@ def argsparser():
     args = parser.parse_args()
     return args
 
-
+# 主程序入口
 if __name__ == '__main__':
     compare_pass = True
     cnt_file_path = os.path.abspath(__file__)
     current_dir = os.path.dirname(cnt_file_path)
     benchmark_path = current_dir + "/benchmark.txt"
     args = argsparser()
+    # 根据平台和目标类型设置基准测试中的平台名称
     if args.platform == "soc":
         if args.target == "BM1684X":
             platform = "SE7-32"
@@ -165,14 +186,16 @@ if __name__ == '__main__':
         platform = args.target + " SoC" if args.platform == "soc" else args.target + " PCIe"
     min_width = 17
     
+    # 检查基准测试文件是否存在，如果不存在则创建
     if not os.path.exists(benchmark_path):
         with open(benchmark_path, "w") as f:
             benchmark_str = "|{:^13}|{:^19}|{:^25}|{:^{width}}|{:^{width}}|{:^{width}}|{:^{width}}|\n".format(
-           "platform", "program", "bmodel", "decode_time", "preprocess_time", "inference_time", "postprocess_time", width=min_width)
+               "platform", "program", "bmodel", "decode_time", "preprocess_time", "inference_time", "postprocess_time", width=min_width)
             f.write(benchmark_str)
             
     with open(args.input, "r") as f:
         data = f.read()
+    # 根据语言类型选择合适的模式提取时间数据
     if args.language == "python":    
         extracted_data = extract_times(data, patterns_python)
     elif args.language == "cpp":
@@ -180,11 +203,13 @@ if __name__ == '__main__':
     else:
         print("unsupport code language")
     match_index = -1
+    # 在基准测试数据中查找匹配的条目
     for i in range(0, len(table_data["platform"])):
         if platform == table_data["platform"][i] and args.program == table_data["program"][i] and args.bmodel == table_data["bmodel"][i]:
             match_index = i
             break
     baseline_data = {}
+    # 如果找到匹配条目，提取基准测试数据
     if match_index == -1:
         print("Unmatched case.")
     else:
@@ -192,6 +217,7 @@ if __name__ == '__main__':
         baseline_data["preprocess"] = table_data["preprocess"][match_index]
         baseline_data["inference"] = table_data["inference"][match_index]
         baseline_data["postprocess"] = table_data["postprocess"][match_index]
+    # 比较提取的数据和基准测试数据，检查差异
     for key, statis in baseline_data.items():
         if statis < 1:
             if abs(statis - extracted_data[key]) > 0.5:
@@ -205,12 +231,14 @@ if __name__ == '__main__':
             print("Now is: ", extracted_data[key])
             compare_pass = False
         
+    # 根据当前数据生成新的基准测试条目
     benchmark_str = "|{:^13}|{:^19}|{:^25}|{decode:^{width}.2f}|{preprocess:^{width}.2f}|{inference:^{width}.2f}|{postprocess:^{width}.2f}|\n".format(
                      platform, args.program, args.bmodel, **extracted_data, width=min_width)
     
     with open(benchmark_path, "a") as f:
         f.write(benchmark_str)
         
+    # 如果存在不通过的比较，退出程序
     if compare_pass == False:
         sys.exit(1)
         
