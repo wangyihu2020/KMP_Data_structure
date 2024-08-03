@@ -35,7 +35,8 @@ def argsparser():
     return args
 
 # 定义将COCO80类映射到COCO91类的函数
-def coco80_to_coco91_class():
+def coco80_to_coco91_class():# converts 80-index (val2014) to 91-index (paper)
+    # https://tech.amikelive.com/node-718/what-object-categories-labels-are-in-coco-dataset/
     """
     将COCO 2014年的80个类别ID映射到COCO 2017年的91个类别ID。
     
@@ -76,6 +77,7 @@ def convert_to_coco_keypoints(json_file, cocoGt):
                 image_id = image["id"]
                 break
         person_num = int(len(keypoints) / (len(keypoints_openpose_map) * 3))
+        # print(len(keypoints), len(keypoints_openpose_map), person_num)
         for i in range(person_num):
             data = dict()
             data['image_id'] = int(image_id)
@@ -147,6 +149,11 @@ def main(args):
     
     cocoDt = cocoGt.loadRes('temp.json')
     cocoEval = COCOeval(cocoGt, cocoDt, args.ann_type)
+
+    # imgIds = sorted(cocoGt.getImgIds())
+    # cocoEval.params.imgIds = imgIds
+
+
     cocoEval.evaluate()
     cocoEval.accumulate()
     cocoEval.summarize()
