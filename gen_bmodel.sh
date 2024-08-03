@@ -11,7 +11,6 @@ num_device=1
 mode_args=""
 device_args=""
 quantize_args="--quantize F16"
-quantize_embedding="--quantize F16"
 addr_args=""
 name=""
 num_layers=
@@ -59,13 +58,7 @@ if [[ -z "$seq_length" ]]; then
     exit 1
 fi
 
-if [ "$name" = "qwen2-7b" ]; then
-  num_layers=27
-  hidden_size=3584
-  mode="bf16"
-  quantize_embedding="--quantize BF16"
-  echo "Compile Qwen2-7B"
-elif [ "$name" = "qwen1.5-7b" ]; then
+if [ "$name" = "qwen1.5-7b" ]; then
   num_layers=31
   hidden_size=4096
   echo "Compile Qwen1.5-7B"
@@ -82,7 +75,7 @@ elif [ "$name" = "qwen1.5-0.5b" ]; then
   hidden_size=1024
   echo "Compile Qwen1.5-0.5B"
 else
-  >&2 echo -e "Error: Invalid name $name, the input name must be \033[31mqwen1.5-1.8b|qwen1.5-7b|qwen2-7b\033[0m"
+  >&2 echo -e "Error: Invalid name $name, the input name must be \033[31mqwen1.5-1.8b|qwen1.5-7b\033[0m"
   exit 1
 fi
 
@@ -90,8 +83,6 @@ if [ x$mode == x"int8" ]; then
     quantize_args="--quantize W8F16"
 elif [ x$mode == x"f16" ]; then
     quantize_args="--quantize F16"
-elif [ x$mode == x"bf16" ]; then
-    quantize_args="--quantize BF16"
 elif [ x$mode == x"int4" ]; then
     quantize_args="--quantize W4F16 --q_group_size 64"
 else
@@ -123,7 +114,7 @@ model_transform.py \
 
 model_deploy.py \
     --mlir embedding.mlir \
-    $quantize_embedding \
+    --quantize F16 \
     --quant_input \
     --quant_output \
     --chip bm1684x \
@@ -139,7 +130,7 @@ model_transform.py \
 
 model_deploy.py \
     --mlir embedding_cache.mlir \
-    $quantize_embedding \
+    --quantize F16 \
     --quant_input \
     --quant_output \
     --chip bm1684x \
