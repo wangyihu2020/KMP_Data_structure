@@ -9,6 +9,9 @@
 #include <functional>
 
 #include "draw_funcs.h"
+#include <termios.h>
+
+using namespace std;
 
 typedef struct demo_config_ {
   int num_graphs;
@@ -18,6 +21,7 @@ typedef struct demo_config_ {
   nlohmann::json listen_config;
   bool download_image;
   std::string engine_config_file;
+  std::string cameras_config_file;  // add by ccy
   std::vector<std::string> class_names;
   std::string draw_func_name;
   std::vector<std::string> car_attr;
@@ -28,9 +32,11 @@ typedef struct demo_config_ {
 constexpr const char* JSON_CONFIG_DOWNLOAD_IMAGE_FILED = "download_image";
 constexpr const char* JSON_CONFIG_ENGINE_CONFIG_PATH_FILED =
     "engine_config_path";
+// add by ccy
+constexpr const char* JSON_CONFIG_CAMERAS_CONFIG_PATH_FILED =
+    "cameras_config_path";
 constexpr const char* JSON_CONFIG_CLASS_NAMES_FILED = "class_names";
 constexpr const char* JSON_CONFIG_CHANNEL_CONFIG_FILED = "channels";
-constexpr const char* JSON_CONFIG_CHANNEL_CONFIG_GRAPH_ID_FILED = "graph_id";
 constexpr const char* JSON_CONFIG_CHANNEL_CONFIG_CHANNEL_ID_FILED =
     "channel_id";
 constexpr const char* JSON_CONFIG_CHANNEL_CONFIG_URL_FILED = "url";
@@ -57,6 +63,137 @@ constexpr const char* JSON_CONFIG_HTTP_CONFIG_IP_FILED = "ip";
 constexpr const char* JSON_CONFIG_HTTP_CONFIG_PORT_FILED = "port";
 constexpr const char* JSON_CONFIG_HTTP_CONFIG_PATH_FILED = "path";
 
+// add by ccy
+// parse cameralist
+enum cameraStatus
+{
+  cameraStatus_unused,
+  cameraStatus_used
+};
+
+typedef struct camera_config_{
+  int channel_id;
+  int camera_id;
+  string url;
+  string source_type;
+  cameraStatus status;
+
+} camera_config;
+
+typedef struct camera_list_config_ {
+  int num_cameras;
+  std::vector<camera_config> camera_configs;
+
+  void reset()
+  {
+    num_cameras = 0;
+    camera_configs.clear();
+  };
+} camera_list_config;
+
+struct camera_list_perChannel
+{
+  int channel_id;
+  vector<string> urls;
+  int current_url_index;
+
+  void reset()
+  {
+    channel_id = 0;
+    current_url_index = 0;
+    urls.clear();
+  }
+};
+
+typedef struct camera_sorted_info_{
+  vector<camera_list_perChannel> channels;
+
+  void reset()
+  {
+    channels.clear();
+  }
+
+}camera_sorted_info;
+
+constexpr const char* JSON_CAMERAS_CONFIG_CHANNEL_CONFIG_FILED = "cameras";
+constexpr const char* JSON_CAMERAS_CONFIG_CHANNEL_CONFIG_CHANNEL_ID_FILED =
+    "channel_id";
+constexpr const char* JSON_CAMERAS_CONFIG_CHANNEL_CONFIG_URL_FILED = "url";
+constexpr const char* JSON_CAMERAS_CONFIG_CHANNEL_CONFIG_SOURCE_TYPE_FILED = 
+    "source_type";
+constexpr const char* JSON_CAMERAS_CONFIG_CHANNEL_CONFIG_CAMERA_ID_FILED =
+    "camera_id";
+constexpr const char* JSON_CAMERAS_CONFIG_CHANNEL_CONFIG_STATUS_FILED = "status";
+
+void parse_camera_list_json(std::string& json_path, camera_list_config &config)
+{
+  std::ifstream istream;
+  istream.open(json_path);
+  STREAM_CHECK(istream.is_open(), "Please check camera config file ", json_path,
+               " exists.");
+  nlohmann::json cameras_json;
+  istream >> cameras_json;
+  istream.close();
+
+  config.reset();
+
+  auto camera_config_it = cameras_json.find(JSON_CAMERAS_CONFIG_CHANNEL_CONFIG_FILED);
+  for (auto& channel_it : *camera_config_it) {
+    camera_config cameraInfo;
+    cameraInfo.channel_id =
+        channel_it.find(JSON_CAMERAS_CONFIG_CHANNEL_CONFIG_CHANNEL_ID_FILED)
+            ->get<int>();
+    cameraInfo.url = channel_it.find(JSON_CAMERAS_CONFIG_CHANNEL_CONFIG_URL_FILED)
+                              ->get<std::string>();
+    cameraInfo.source_type =
+        channel_it.find(JSON_CAMERAS_CONFIG_CHANNEL_CONFIG_SOURCE_TYPE_FILED)
+            ->get<std::string>();
+    cameraInfo.camera_id =
+        channel_it.find(JSON_CAMERAS_CONFIG_CHANNEL_CONFIG_CAMERA_ID_FILED)
+            ->get<int>();
+    cameraInfo.status =
+        channel_it.find(JSON_CAMERAS_CONFIG_CHANNEL_CONFIG_STATUS_FILED)
+            ->get<std::string>() == "UNUSED"
+            ? cameraStatus_unused
+            : cameraStatus_used;
+
+    config.camera_configs.push_back(cameraInfo);
+    config.num_cameras ++;
+  }
+
+}
+
+void sort_camera_list_info(camera_list_config config, camera_sorted_info_ &sorted_info)
+{
+  sorted_info.reset();
+
+  for(int i = 0; i < config.num_cameras; i ++)
+  {
+
+    bool bFindChannel = false;
+    for(int j = 0; j < sorted_info.channels.size(); j ++)
+    {
+      if(sorted_info.channels.at(j).channel_id == config.camera_configs.at(i).channel_id)
+      {
+        sorted_info.channels.at(j).urls.push_back(config.camera_configs.at(i).url);
+        bFindChannel = true;
+        break;
+      }
+    }
+    
+    if(!bFindChannel)
+    {
+      camera_list_perChannel perChannel;
+      perChannel.reset();
+      perChannel.channel_id = config.camera_configs.at(i).channel_id;
+      perChannel.urls.push_back(config.camera_configs.at(i).url);
+
+      sorted_info.channels.push_back(perChannel);
+    }
+  }
+}
+// add end
+
 demo_config parse_demo_json(std::string& json_path) {
   std::ifstream istream;
   istream.open(json_path);
@@ -75,6 +212,13 @@ demo_config parse_demo_json(std::string& json_path) {
         demo_json.find(JSON_CONFIG_DOWNLOAD_IMAGE_FILED)->get<bool>();
   config.engine_config_file =
       demo_json.find(JSON_CONFIG_ENGINE_CONFIG_PATH_FILED)->get<std::string>();
+  // add by ccy
+  if(demo_json.contains(JSON_CONFIG_CAMERAS_CONFIG_PATH_FILED))
+  { 
+    std::cout << "ccy find cameralist" << std::endl;
+    config.cameras_config_file =
+      demo_json.find(JSON_CONFIG_CAMERAS_CONFIG_PATH_FILED)->get<std::string>();
+  }
   std::string class_names_file;
   if (demo_json.contains(JSON_CONFIG_CLASS_NAMES_FILED))
     class_names_file =
@@ -151,13 +295,6 @@ demo_config parse_demo_json(std::string& json_path) {
 
   for (auto& channel_it : *channel_config_it) {
     nlohmann::json channel_json;
-    auto graph_id_it =
-        channel_it.find(JSON_CONFIG_CHANNEL_CONFIG_GRAPH_ID_FILED);
-    if (graph_id_it == channel_it.end()) {
-      channel_json["graph_id"] = 0;
-    } else {
-      channel_json["graph_id"] = graph_id_it->get<int>();
-    }
     channel_json["channel_id"] =
         channel_it.find(JSON_CONFIG_CHANNEL_CONFIG_CHANNEL_ID_FILED)
             ->get<int>();
@@ -228,6 +365,64 @@ demo_config parse_demo_json(std::string& json_path) {
   return config;
 }
 
+bool bDispatch = false;
+int switchtime_second = 10;
+void* dispatchFun(void* data)
+{
+  IVS_INFO("ccy dispatchFun!");
+  while(1)
+  {
+      // wait 
+      sleep(switchtime_second);
+      // change channel
+      bDispatch = !bDispatch;
+      IVS_INFO("ccy dispatchFun111! status:{0}",bDispatch);
+  }
+}
+
+
+typedef struct MEMPACKED         //定义一个mem occupy的结构体  
+{  
+    char name1[20];      //定义一个char类型的数组名name有20个元素  
+    unsigned long MemTotal;  
+    char name2[20];  
+    unsigned long MemFree;  
+    char name3[20];  
+    unsigned long Buffers;  
+    char name4[20];  
+    unsigned long Cached;  
+    char name5[20];  
+    unsigned long SwapCached;  
+}MEM_OCCUPY;  
+
+void get_memoccupy(MEM_OCCUPY *mem) //对无类型get函数含有一个形参结构体类弄的指针O  
+{  
+    FILE *fd;  
+    char buff[256];  
+    MEM_OCCUPY *m;  
+    m = mem;  
+      
+    fd = fopen("/proc/meminfo", "r");  
+    //MemTotal: 515164 kB  
+    //MemFree: 7348 kB  
+    //Buffers: 7892 kB  
+    //Cached: 241852  kB  
+    //SwapCached: 0 kB  
+    //从fd文件中读取长度为buff的字符串再存到起始地址为buff这个空间里   
+    fgets(buff, sizeof(buff), fd);  
+    sscanf(buff, "%s %lu ", m->name1, &m->MemTotal);  
+    fgets(buff, sizeof(buff), fd);  
+    sscanf(buff, "%s %lu ", m->name2, &m->MemFree);  
+    fgets(buff, sizeof(buff), fd);  
+    sscanf(buff, "%s %lu ", m->name3, &m->Buffers);  
+    fgets(buff, sizeof(buff), fd);  
+    sscanf(buff, "%s %lu ", m->name4, &m->Cached);  
+    fgets(buff, sizeof(buff), fd);   
+    sscanf(buff, "%s %lu", m->name5, &m->SwapCached);  
+      
+    fclose(fd);     //关闭文件fd  
+} 
+
 int main(int argc, char* argv[]) {
   const char* keys =
       "{demo_config_path | "
@@ -263,12 +458,19 @@ int main(int argc, char* argv[]) {
   istream >> engine_json;
   istream.close();
 
-  // engine.json里的graph数量
   demo_json.num_graphs = engine_json.size();
-  // demo.json里的码流数量，这里每个码流都可以配置graph_id，对应不同的graph
   demo_json.num_channels_per_graph = demo_json.channel_configs.size();
-  // 总的码流数就是demo_json.num_channels_per_graph，这个命名需要修改
-  int num_channels = demo_json.num_channels_per_graph;
+  int num_channels = demo_json.num_channels_per_graph * demo_json.num_graphs;
+
+  // #if BMCV_VERSION_MAJOR > 1
+
+  //   STREAM_CHECK(
+  //       num_channels <= 1,
+  //       "In order to ensure that the program can be run properly on the 1688,
+  //       it " "is required that the number of input channels is less
+  //       than 2.");
+
+  // #endif
 
   std::vector<::sophon_stream::common::FpsProfiler> fpsProfilers(num_channels);
   for (int i = 0; i < num_channels; ++i) {
@@ -352,40 +554,160 @@ int main(int argc, char* argv[]) {
   engine.setListener(listenthread);
   std::map<int, std::vector<std::pair<int, int>>> graph_src_id_port_map;
   init_engine(engine, engine_json, sinkHandler, graph_src_id_port_map);
+  IVS_INFO("ccy engine!");
 
-  for (auto& channel_config : demo_json.channel_configs) {
-    int graph_id = channel_config["graph_id"]; // 默认是graph0
-    auto channelTask =
-        std::make_shared<sophon_stream::element::decode::ChannelTask>();
-    channelTask->request.operation = sophon_stream::element::decode::
-        ChannelOperateRequest::ChannelOperate::START;
-    channelTask->request.channelId = channel_config["channel_id"];
-    channelTask->request.json = channel_config.dump();
-    int decode_id = channel_config["decode_id"];
-    // std::pair<int, int> src_id_port =
-    // graph_src_id_port_map[graph_id][decode_id];
+  for (auto graph_id : engine.getGraphIds()) {
+    for (auto& channel_config : demo_json.channel_configs) {
+      auto channelTask =
+          std::make_shared<sophon_stream::element::decode::ChannelTask>();
+      channelTask->request.operation = sophon_stream::element::decode::
+          ChannelOperateRequest::ChannelOperate::START;
+      channelTask->request.channelId = channel_config["channel_id"];
+      channelTask->request.json = channel_config.dump();
+      int decode_id = channel_config["decode_id"];
+      // std::pair<int, int> src_id_port =
+      // graph_src_id_port_map[graph_id][decode_id];
 
-    auto src_id_port_vec = graph_src_id_port_map[graph_id];
-    for (auto& src_id_port : src_id_port_vec) {
-      // decode_id == -1为默认情况，即只有一个解码器
-      // decode_id != -1，即有多个解码器，要求每个都写清参数
-      if ((decode_id == -1 && src_id_port_vec.size() == 1) ||
-          src_id_port.first == decode_id) {
-        sophon_stream::common::ErrorCode errorCode = engine.pushSourceData(
-            graph_id, src_id_port.first, src_id_port.second,
-            std::static_pointer_cast<void>(channelTask));
-        IVS_DEBUG(
-            "Push Source Data, GraphId = {0}, ElementId = {1}, ElementPort = "
-            "{2}, ChannelId = {3}",
-            graph_id, src_id_port.first, src_id_port.second,
-            channelTask->request.channelId);
+      auto src_id_port_vec = graph_src_id_port_map[graph_id];
+      for (auto& src_id_port : src_id_port_vec) {
+        // decode_id == -1为默认情况，即只有一个解码器
+        // decode_id != -1，即有多个解码器，要求每个都写清参数
+        if ((decode_id == -1 && src_id_port_vec.size() == 1) || src_id_port.first == decode_id) {
+          sophon_stream::common::ErrorCode errorCode = engine.pushSourceData(
+              graph_id, src_id_port.first, src_id_port.second,
+              std::static_pointer_cast<void>(channelTask));
+        } else {
+          IVS_ERROR("Push Source Data Failed! Please Check Input Json!");
+        }
       }
     }
   }
+  IVS_INFO("ccy startEnd!");
+
+  // add for test ccy
+  pthread_t dispatch_thread;
+
+  if(!demo_json.cameras_config_file.empty())
+  {
+    pthread_create(&dispatch_thread, NULL, dispatchFun, NULL); 
+
+    camera_list_config cameralistConfig;
+    parse_camera_list_json(demo_json.cameras_config_file, cameralistConfig);
+    camera_sorted_info sortedInfo;
+    sort_camera_list_info(cameralistConfig, sortedInfo);
+
+    IVS_INFO("ccy cameralist! channelCount:{0}",sortedInfo.channels.size());
+
+    bool bRun = true;
+    bool lastStatus = false;
+    int listIndex = 0;
+    MEM_OCCUPY mem_stat;
+
+    while(bRun)
+    {
+      if(bDispatch != lastStatus)
+      {
+        lastStatus = bDispatch;
+        IVS_INFO("ccy dispatchStart! status:{0}",lastStatus);
+        
+        for (auto graph_id : engine.getGraphIds()) {
+          for (auto& channel_config : demo_json.channel_configs) {
+
+            for(int i = 0; i < sortedInfo.channels.size(); i ++)
+            {
+              if(channel_config["channel_id"] == sortedInfo.channels.at(i).channel_id)
+              {
+                auto channelTask =
+                  std::make_shared<sophon_stream::element::decode::ChannelTask>();
+
+                channelTask->request.operation = sophon_stream::element::decode::
+                    ChannelOperateRequest::ChannelOperate::STOP;
+                channelTask->request.channelId = channel_config["channel_id"];
+                channelTask->request.json = channel_config.dump();
+                int decode_id = channel_config["decode_id"];
+
+                auto src_id_port_vec = graph_src_id_port_map[graph_id];
+                for (auto& src_id_port : src_id_port_vec) {
+                  IVS_INFO("ccy dispatch! decodeid:{0},portSize:{1}",decode_id,src_id_port_vec.size());
+                  // decode_id == -1为默认情况，即只有一个解码器
+                  // decode_id != -1，即有多个解码器，要求每个都写清参数
+                  if ((decode_id == -1 && src_id_port_vec.size() == 1) || src_id_port.first == decode_id) {
+                    sophon_stream::common::ErrorCode errorCode = engine.pushSourceData(
+                        graph_id, src_id_port.first, src_id_port.second,
+                        std::static_pointer_cast<void>(channelTask));
+                  } else {
+                    IVS_ERROR("Push Source Data Failed! Please Check Input Json!");
+                  }
+                }
+
+              }
+            }
+          }
+        }
+
+        IVS_INFO("ccy dispatch stop!");
+        get_memoccupy((MEM_OCCUPY *)&mem_stat);
+        cout << "TotalMem:" << mem_stat.MemTotal
+            << "Free:" << mem_stat.MemFree
+            << "Buffer:" << mem_stat.Buffers
+            << endl;
+
+        for (auto graph_id : engine.getGraphIds()) {
+          for (auto& channel_config : demo_json.channel_configs) {
+            for(int i = 0; i < sortedInfo.channels.size(); i ++)
+            {
+              if(channel_config["channel_id"] == sortedInfo.channels.at(i).channel_id)
+              {
+                auto channelTask =
+                  std::make_shared<sophon_stream::element::decode::ChannelTask>();
+
+                channelTask->request.operation = sophon_stream::element::decode::
+                    ChannelOperateRequest::ChannelOperate::START;
+                channelTask->request.channelId = channel_config["channel_id"];
+
+                int index = sortedInfo.channels.at(i).current_url_index;
+                IVS_INFO("ccy dispatching channel = {0}, urlIndex = {1}", sortedInfo.channels.at(i).channel_id, index);
+                
+                channel_config["url"] = sortedInfo.channels.at(i).urls.at(index);
+                index ++;
+                if(index >= sortedInfo.channels.at(i).urls.size())
+                {
+                  index = 0;
+                }
+                sortedInfo.channels.at(i).current_url_index = index;
+
+                channelTask->request.json = channel_config.dump();
+                int decode_id = channel_config["decode_id"];
+
+                auto src_id_port_vec = graph_src_id_port_map[graph_id];
+                for (auto& src_id_port : src_id_port_vec) {
+                  // decode_id == -1为默认情况，即只有一个解码器
+                  // decode_id != -1，即有多个解码器，要求每个都写清参数
+                  if ((decode_id == -1 && src_id_port_vec.size() == 1) || src_id_port.first == decode_id) {
+                    sophon_stream::common::ErrorCode errorCode = engine.pushSourceData(
+                        graph_id, src_id_port.first, src_id_port.second,
+                        std::static_pointer_cast<void>(channelTask));
+                  } else {
+                    IVS_ERROR("Push Source Data Failed! Please Check Input Json!");
+                  }
+                }
+
+              }
+            }
+            
+          }
+        }
+      }
+    }
+    get_memoccupy((MEM_OCCUPY *)&mem_stat);
+    IVS_INFO("ccy addEnd!");
+  }
+  // add end
 
   {
     std::unique_lock<std::mutex> uq(mtx);
     cv.wait(uq);
+    std::cout << "ccy wait" << std::endl;
   }
   for (int i = 0; i < demo_json.num_graphs; i++) {
     std::cout << "graph stop" << std::endl;
@@ -396,5 +718,9 @@ int main(int argc, char* argv[]) {
   double fps = static_cast<double>(frameCount) / totalCost;
   std::cout << "frame count is " << frameCount << " | fps is " << fps * 1000000
             << " fps." << std::endl;
+
+
+  pthread_join(dispatch_thread, NULL);
+
   return 0;
 }
