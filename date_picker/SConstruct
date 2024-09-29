@@ -1,0 +1,17 @@
+﻿import os
+import scripts.app_helper as app
+
+global LINUX_FB
+
+helper = app.Helper(ARGUMENTS)
+helper.set_dll_def('src/date_picker.def').set_libs(['date_picker']).call(DefaultEnvironment)
+
+LINUX_FB = ARGUMENTS.get('LINUX_FB', '')
+if LINUX_FB:
+    print('linux_fb')
+    SConscriptFiles = ['src/SConscript']
+else:
+    print('linux')
+    SConscriptFiles = ['src/SConscript', 'demos/SConscript', 'tests/SConscript']
+
+SConscript(SConscriptFiles)
