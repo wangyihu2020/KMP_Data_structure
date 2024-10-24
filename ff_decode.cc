@@ -7,8 +7,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "ff_decode.h"
-
+#include <common/ff_decode.h>
+#include <common/recorder.h>
+#include <manage.h>
 using namespace std;
 
 bool hardware_decode = true;
@@ -85,6 +86,7 @@ bool determine_hardware_decode(uint8_t* buffer) {
 
 VideoDecFFM::VideoDecFFM() {
   ifmt_ctx = NULL;
+  // m_recorder = nullptr;
   video_dec_ctx = NULL;
   video_dec_par = NULL;
   decoder = NULL;
@@ -99,6 +101,8 @@ VideoDecFFM::VideoDecFFM() {
   height = 0;
   pix_fmt = 0;
   frame_id = 0;
+
+  // pkt_inUse = false;
 
   video_stream_idx = -1;
   refcount = 1;
@@ -414,6 +418,7 @@ int VideoDecFFM::openDec(bm_handle_t* dec_handle, const char* input) {
   av_init_packet(pkt);
   pkt->data = NULL;
   pkt->size = 0;
+
   gettimeofday(&last_time, NULL);
   frame = av_frame_alloc();
   frame_id = 0;
@@ -441,6 +446,7 @@ int VideoDecFFM::openDec(bm_handle_t* dec_handle, const char* input) {
     av_dict_set(&dict, "rtsp_flags", "prefer_tcp", 0);
     // av_dict_set(&dict, "rtsp_transport", "tcp", 0);
   }
+  av_dict_set(&dict, "keep_rtsp_timestamp", "1", 0); // 明确保持时间戳
 
   if (this->is_camera) {
     av_dict_set_int(&dict, "v4l2_buffer_num", 8, 0);  // v4l2bufnum = 8
@@ -453,6 +459,7 @@ int VideoDecFFM::openDec(bm_handle_t* dec_handle, const char* input) {
       0);  // Returns (Connection timed out) every  5 seconds ,when disconnect
 
   ret = avformat_open_input(&ifmt_ctx, input, NULL, &dict);
+
   if (ret < 0) {
     av_log(NULL, AV_LOG_ERROR, "Cannot open input file\n");
     return ret;
@@ -495,6 +502,7 @@ void VideoDecFFM::closeDec() {
     avformat_free_context(ifmt_ctx);
     ifmt_ctx = NULL;
   }
+
   if (frame) {
     av_frame_unref(frame);
     av_frame_free(&frame);
@@ -504,6 +512,7 @@ void VideoDecFFM::closeDec() {
     av_packet_unref(pkt);
     av_packet_free(&pkt);
   }
+
   frame_id = 0;
   quit_flag = false;
 }
@@ -702,6 +711,10 @@ AVFrame* VideoDecFFM::grabFrame(int& eof) {
         return NULL;
       }
     }
+    
+    // if (m_recorder && m_recorder->isReady()) {
+    //   m_recorder->record(pkt);
+    // }
 
     if (pkt->stream_index != video_stream_idx) {
       continue;
@@ -714,7 +727,9 @@ AVFrame* VideoDecFFM::grabFrame(int& eof) {
 
     if (refcount) av_frame_unref(frame);
     gettimeofday(&tv1, NULL);
+
     ret = avcodec_decode_video2(video_dec_ctx, frame, &got_frame, pkt);
+
     STREAM_CHECK(ret != AVERROR(ENOMEM), "Error decoding video frame, memory allocation failed\n");
     STREAM_CHECK(ret != AVERROR_EXTERNAL, "Error decoding video frame, decoder hardware exception\n");
     if (ret < 0) {
@@ -747,6 +762,155 @@ AVFrame* VideoDecFFM::grabFrame(int& eof) {
     break;
   }
   return frame;
+}
+
+
+AVFrame* VideoDecFFM::grabFrameFromPacket(int& frameId, std::shared_ptr<AVPacket> packet) {
+  int ret = 0;
+  int got_frame = 0;
+  struct timeval tv1, tv2;
+  gettimeofday(&tv1, NULL);
+  if (quit_flag) {
+
+    AVFrame* flush_frame = flushDecoder();
+    if (flush_frame) {
+      frameId = frame_id++;
+      return flush_frame;
+    }
+    return nullptr;
+  }
+
+  if (!packet) {
+    pkt_inUse = false;
+    return nullptr;
+  }
+  // av_packet_unref(pkt);
+  // av_packet_ref(pkt, packet.get());
+  if (packet->stream_index != video_stream_idx) {
+    // pkt_inUse = false;
+    pkt_inUse = false;
+    return nullptr;
+  }
+
+  if (!frame) {
+    av_log(video_dec_ctx, AV_LOG_ERROR, "Could not allocate frame\n");
+    // pkt_inUse = false;
+    pkt_inUse = false;
+    return nullptr;
+  }
+
+  if (refcount) av_frame_unref(frame);
+  gettimeofday(&tv1, NULL);
+    // pkt_inUse = false;
+  ret = avcodec_decode_video2(video_dec_ctx, frame, &got_frame, packet.get());
+
+  STREAM_CHECK(ret != AVERROR(ENOMEM), "Error decoding video frame, memory allocation failed\n");
+  STREAM_CHECK(ret != AVERROR_EXTERNAL, "Error decoding video frame, decoder hardware exception\n");
+
+  if (ret < 0) {
+    av_log(video_dec_ctx, AV_LOG_ERROR, "Error decoding video frame (%d)\n",
+            ret);
+    pkt_inUse = false;
+    return nullptr;
+  }
+
+  if (!got_frame) {
+
+    pkt_inUse = false;
+    return nullptr;
+  }
+
+  width = video_dec_ctx->width;
+  height = video_dec_ctx->height;
+  pix_fmt = video_dec_ctx->pix_fmt;
+  if (frame->width != width || frame->height != height ||
+      frame->format != pix_fmt) {
+    av_log(video_dec_ctx, AV_LOG_ERROR,
+            "Error: Width, height and pixel format have to be "
+            "constant in a rawvideo file, but the width, height or "
+            "pixel format of the input video changed:\n"
+            "old: width = %d, height = %d, format = %s\n"
+            "new: width = %d, height = %d, format = %s\n",
+            width, height, av_get_pix_fmt_name((AVPixelFormat)pix_fmt),
+            frame->width, frame->height,
+            av_get_pix_fmt_name((AVPixelFormat)frame->format));
+
+    pkt_inUse = false;
+    return nullptr;
+  }
+
+  pkt_inUse = false;
+
+  frameId = frame_id++;
+
+  return frame;
+}
+
+std::shared_ptr<AVPacket> VideoDecFFM::fetchPacket(int& eof) {
+  int ret = 0;
+  int got_frame = 0;
+  struct timeval tv1, tv2;
+  gettimeofday(&tv1, NULL);
+
+  std::shared_ptr<AVPacket> packet = sophon_stream::Manage::getInstance()->getAVPacketFromPool();
+// std::cout << "here xigou1" << std::endl;
+// AVPacket* ppp = packet.get();
+// av_packet_free(&ppp);
+// std::cout << "here xigou2" << std::endl;
+  while (1) {
+    // if (pkt_inUse) {
+    //   std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    //   continue;
+    // }
+    av_packet_unref(packet.get());
+    ret = av_read_frame(ifmt_ctx, packet.get());
+    if (ret < 0) {
+      if (ret == AVERROR(EAGAIN)) {
+        gettimeofday(&tv2, NULL);
+        if (((tv2.tv_sec - tv1.tv_sec) * 1000 +
+             (tv2.tv_usec - tv1.tv_usec) / 1000) > 1000 * 60) {
+          av_log(video_dec_ctx, AV_LOG_WARNING,
+                 "av_read_frame failed ret(%d) retry time >60s.\n", ret);
+          break;
+        }
+        // usleep(10 * 1000);
+        continue;
+      } else if (ret == AVERROR_EOF) {
+        quit_flag = true;
+        // pkt_inUse = false;
+        eof = 1;
+        av_log(video_dec_ctx, AV_LOG_ERROR,
+          "av_read_frame ret(%d) maybe eof...\n", ret);
+        sophon_stream::Manage::getInstance()->recycleAVPacketToPool(packet);
+        return nullptr;
+      } else {
+        quit_flag = true;
+        sophon_stream::Manage::getInstance()->recycleAVPacketToPool(packet);
+        // pkt_inUse = false;
+        return nullptr;
+      }
+    }
+    if (packet->stream_index != video_stream_idx) {
+      continue;
+    }
+    break;
+  }
+  // av_packet_ref(pkt, packet.get());
+  pkt_inUse = true;
+  return packet;
+}
+
+void VideoDecFFM::doneRecord() {
+  std::cout << "nvrdebug done" << std::endl;
+  // if (mMode == sophon_stream::StreamMode::REC) {
+  //   pkt_inUse = false;
+  //   return;
+  // }
+}
+
+
+void VideoDecFFM::setMode(sophon_stream::StreamMode mode) {
+  mMode = mode;
 }
 
 std::shared_ptr<bm_image> VideoDecFFM::grab(int& frameId, int& eof,
@@ -808,6 +972,82 @@ std::shared_ptr<bm_image> VideoDecFFM::grab(int& frameId, int& eof,
   });
   avframe_to_bm_image(*(this->handle), avframe, spBmImage.get(), false);
   return spBmImage;
+}
+
+std::shared_ptr<bm_image> VideoDecFFM::grabFromPacket(int frameId, std::shared_ptr<AVPacket> packet) {
+
+  std::shared_ptr<bm_image> spBmImage = nullptr;
+
+  AVFrame* avframe = grabFrameFromPacket(frameId, packet);//yihu, should depend on mode
+
+  if (!avframe) {
+    return spBmImage;
+  }
+
+  // if ((mSampleStrategy == sampleStrategy::DROP) && (frameId % mSampleInterval != 0)) {
+  //   return spBmImage;
+  // }
+  //need record
+
+  timeval pt;
+  gettimeofday(&pt, NULL);
+
+  spBmImage.reset(new bm_image, [](bm_image* p) {
+    bm_image_destroy(*p);
+    delete p;
+    p = nullptr;
+  });
+  avframe_to_bm_image(*(this->handle), avframe, spBmImage.get(), false);
+  return spBmImage;
+}
+
+std::shared_ptr<AVPacket> VideoDecFFM::fetch(int& eof, int sampleInterval, sampleStrategy strategy) {
+                          
+  if (mSampleInterval != sampleInterval) {
+    mSampleInterval = sampleInterval;
+  }
+  if (mSampleStrategy != strategy) {
+    mSampleStrategy = strategy;
+  }
+
+  if (fps != -1) {
+    gettimeofday(&current_time, NULL);
+    double time_delta =
+        1000 * ((current_time.tv_sec - last_time.tv_sec) +
+                (double)(current_time.tv_usec - last_time.tv_usec) / 1000000.0);
+    int time_to_sleep = frame_interval_time - time_delta;
+    if (time_to_sleep > 0)
+      std::this_thread::sleep_for(std::chrono::milliseconds(time_to_sleep));
+    gettimeofday(&last_time, NULL);
+  }
+  std::shared_ptr<AVPacket> packet = fetchPacket(eof);
+  // 没有取到，尝试重连
+  if (!packet && (this->is_rtsp || this->is_rtmp || this->is_gb28181)) {
+    // 第一个while，关闭并重新访问url。如果失败，则再次尝试
+    while (1) {
+      IVS_INFO("grabFrame failed! Try to reconnect...");
+      this->closeDec();
+      int ret = this->openDec(handle, inputUrl.c_str());
+      if (ret < 0) continue;
+      // 第二个while，尝试重新获取一帧。如果获取失败，则再次获取
+      // 由于ctrl+C取消推流时会返回EOF，导致stream直接结束，所以这里判断不能是eof
+      while (1) {
+        packet = fetchPacket(eof);
+        if (eof) {
+          IVS_INFO("reopen eof!");
+        }
+        if (pkt) {
+          IVS_INFO("Successfully reconnected, now continue...");
+          // 如果不改变这个eof，ctrl+C取消然后再次推流，会一直返回eof
+          eof = 0;
+          break;
+        }
+      }
+      break;
+    }
+  }
+  
+  return packet;
 }
 
 bool is_jpg(const char* filename) {
@@ -1277,3 +1517,7 @@ void VideoDecFFM::setFps(int f) {
   fps = f;
   frame_interval_time = 1 / fps * 1000;
 }
+
+// void VideoDecFFM::addRecorder(Recorder* r) {
+//   m_recorder = r;
+// }
