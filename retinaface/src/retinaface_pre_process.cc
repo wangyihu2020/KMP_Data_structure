@@ -23,7 +23,6 @@ common::ErrorCode RetinafacePreProcess::preProcess(
   // write your pre process here
   auto jsonPlanner = context->bgr2rgb ? FORMAT_RGB_PLANAR : FORMAT_BGR_PLANAR;
   int i = 0;
-  std::cout << "enter face pre" << std::endl;
   for (auto& objMetadata : objectMetadatas) {
     if (objMetadata->mFrame->mSpData == nullptr) continue;
     bm_image resized_img;
@@ -98,8 +97,6 @@ common::ErrorCode RetinafacePreProcess::preProcess(
                     jsonPlanner, DATA_TYPE_EXT_1N_BYTE, &resized_img, strides);
     auto ret = bm_image_alloc_dev_mem_heap_mask(resized_img, STREAM_VPP_HEAP_MASK);
     STREAM_CHECK(ret == 0, "Alloc Device Memory Failed! Program Terminated.")
-    std::cout << "face pre processing" << std::endl;
-
     bmcv_rect_t crop_rect{0, 0, image1.width, image1.height};
 
     ret = bmcv_image_vpp_convert_padding(context->bmContext->handle(), 1,

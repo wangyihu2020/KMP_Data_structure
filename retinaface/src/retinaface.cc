@@ -16,7 +16,7 @@ namespace sophon_stream {
 namespace element {
 namespace retinaface {
 
-Retinaface::Retinaface(const char* name): ::sophon_stream::framework::Element(name) {}
+Retinaface::Retinaface() {}
 
 Retinaface::~Retinaface() {}
 
@@ -167,12 +167,6 @@ void Retinaface::process(common::ObjectMetadatas& objectMetadatas) {
   if (use_post) mPostProcess->postProcess(mContext, objectMetadatas);
 }
 
-common::ErrorCode Retinaface::setAlgo(int channelId, int model){
-  mChannelModelFlags[channelId] = model;
-  
-  return common::ErrorCode::SUCCESS;
-}
-
 common::ErrorCode Retinaface::doWork(int dataPipeId) {
   common::ErrorCode errorCode = common::ErrorCode::SUCCESS;
 
@@ -207,30 +201,9 @@ common::ErrorCode Retinaface::doWork(int dataPipeId) {
     }
   }
 
-  // int model = 0;
-  // if (objectMetadatas.size() > 0) {
-  //   auto it = mChannelModelFlags.find(objectMetadatas[0]->mFrame->mChannelIdInternal);
-  //   if (it != mChannelModelFlags.end()) {
-  //       model = it->second;
-  //   }
-  // }
-  
-  // if (model & AlgoFlags::FACE) {
-    
-  // }
   process(objectMetadatas);
 
   for (auto& objectMetadata : pendingObjectMetadatas) {
-
-  for (auto detObj : objectMetadata->mFaceObjectMetadatas) {
-    IVS_WARN("mSpData {0}", objectMetadata->mFrame->mSpData == nullptr);
-
-    std::cout << "retinaface FaceObject " <<  " top " << detObj->top << " bottom "
-            << detObj->bottom << " right " << detObj->right << " left "
-            << detObj->left << std::endl;
-  }
-
-
     int channel_id_internal = objectMetadata->mFrame->mChannelIdInternal;
     int outDataPipeId =
         getSinkElementFlag()

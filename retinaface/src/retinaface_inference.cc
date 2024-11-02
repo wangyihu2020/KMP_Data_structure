@@ -33,8 +33,6 @@ common::ErrorCode RetinafaceInference::predict(
     splitOutputMemIntoObjectMetadatas(context, objectMetadatas, outputTensors);
   } else {
     objectMetadatas[0]->mOutputBMtensors = getOutputDeviceMem(context);
-    std::cout << "face pre fowarding" << std::endl;
-
     int ret = context->bmNetwork->forward(
         objectMetadatas[0]->mInputBMtensors->tensors,
         objectMetadatas[0]->mOutputBMtensors->tensors);

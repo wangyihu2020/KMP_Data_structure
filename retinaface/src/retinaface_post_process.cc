@@ -79,7 +79,6 @@ void RetinafacePostProcess::postProcess(
     int face_num = max_face_count > static_cast<int>(faceInfo.size())
                        ? static_cast<int>(faceInfo.size())
                        : max_face_count;
-    std::cout << "face post face_num" << face_num << std::endl;
 
     for (int i = 0; i < face_num; i++) {
       std::shared_ptr<common::FaceObjectMetadata> detData =
@@ -92,7 +91,6 @@ void RetinafacePostProcess::postProcess(
       std::cout << "face left" << faceInfo[i].rect.x1 << " right " << 
           faceInfo[i].rect.x2 << " top " << faceInfo[i].rect.y1 
           << " bottom " <<faceInfo[i].rect.y2 << std::endl;
-
       for (size_t k = 0; k < 5; k++) {
         detData->points_x[k] = faceInfo[i].pts.x[k];
         detData->points_y[k] = faceInfo[i].pts.y[k];

@@ -21,13 +21,9 @@ namespace sophon_stream {
 namespace element {
 namespace retinaface {
 
-enum AlgoFlags {
-  FACE = 4  // 人脸
-};
-
 class Retinaface : public ::sophon_stream::framework::Element {
  public:
-  Retinaface(const char* name);
+  Retinaface();
   ~Retinaface() override;
 
   const static std::string elementName;
@@ -48,8 +44,6 @@ class Retinaface : public ::sophon_stream::framework::Element {
    * @return common::ErrorCode 成功返回common::ErrorCode::SUCCESS
    */
   common::ErrorCode doWork(int dataPipeId) override;
-
-  common::ErrorCode setAlgo(int channelId, int model) override;
 
   void setContext(std::shared_ptr<::sophon_stream::element::Context> context);
   void setPreprocess(std::shared_ptr<::sophon_stream::element::PreProcess> pre);
@@ -109,8 +103,6 @@ class Retinaface : public ::sophon_stream::framework::Element {
 
   std::string mFpsProfilerName;
   ::sophon_stream::common::FpsProfiler mFpsProfiler;
-
-  std::unordered_map<int, int> mChannelModelFlags;   
 
   common::ErrorCode initContext(const std::string& json);
   void process(common::ObjectMetadatas& objectMetadatas);
