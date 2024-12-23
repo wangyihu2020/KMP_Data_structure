@@ -13,8 +13,9 @@
 #include "algorithmApi/post_process.h"
 #include "yolov5_context.h"
 
-namespace sophon_stream {
-namespace element {
+namespace nvr_edge {
+namespace backend {
+namespace stream_elements {
 namespace yolov5 {
 
 struct YoloV5Box {
@@ -36,12 +37,12 @@ typedef struct tpu_kernel_ {
   int32_t detect_num[MAX_BATCH];
 } tpu_kernel;
 
-class Yolov5PostProcess : public ::sophon_stream::element::PostProcess {
+class Yolov5PostProcess : public stream_elements::PostProcess {
  public:
   void init(std::shared_ptr<Yolov5Context> context);
 
   void postProcess(std::shared_ptr<Yolov5Context> context,
-                   common::ObjectMetadatas& objectMetadatas, int dataPipeId);
+                   stream::object_meta_datas& object_meta_datas, int data_pipe_id);
 
   ~Yolov5PostProcess() override;
 
@@ -50,20 +51,21 @@ class Yolov5PostProcess : public ::sophon_stream::element::PostProcess {
   std::shared_ptr<Yolov5Context> global_context = nullptr;
 
   void setTpuKernelMem(std::shared_ptr<Yolov5Context> context,
-                       common::ObjectMetadatas& objectMetadatas,
+                       stream::object_meta_datas& object_meta_datas,
                        tpu_kernel& tpu_k);
   float sigmoid(float x);
   int argmax(float* data, int num);
   void NMS(YoloV5BoxVec& dets, float nmsConfidence);
   void postProcessCPU(std::shared_ptr<Yolov5Context> context,
-                      common::ObjectMetadatas& objectMetadatas);
+                      stream::object_meta_datas& object_meta_datas);
   void postProcessTPUKERNEL(std::shared_ptr<Yolov5Context> context,
-                            common::ObjectMetadatas& objectMetadatas,
-                            int dataPipeId);
+                            stream::object_meta_datas& object_meta_datas,
+                            int data_pipe_id);
 };
 
 }  // namespace yolov5
-}  // namespace element
-}  // namespace sophon_stream
+}  //namespace stream_elements
+}  //namespace backend
+}  //namespace nvr_edge
 
 #endif  // SOPHON_STREAM_ELEMENT_YOLOV5_POST_PROCESS_H_

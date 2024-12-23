@@ -11,22 +11,23 @@
 
 using namespace std::chrono_literals;
 
-namespace sophon_stream {
-namespace element {
+namespace nvr_edge {
+namespace backend {
+namespace stream_elements {
 namespace yolov5 {
 
-Yolov5::Yolov5() {}
+Yolov5::Yolov5(const char* name): stream::element_c(name) {}
 
 Yolov5::~Yolov5() {}
 
 const std::string Yolov5::elementName = "yolov5";
 
-common::ErrorCode Yolov5::initContext(const std::string& json) {
-  common::ErrorCode errorCode = common::ErrorCode::SUCCESS;
+common::nvr_error_code_c Yolov5::initContext(const std::string& json) {
+  common::nvr_error_code_c error_code = common::nvr_error_code_c::SUCCESS;
   do {
     auto configure = nlohmann::json::parse(json, nullptr, false);
     if (!configure.is_object()) {
-      errorCode = common::ErrorCode::PARSE_CONFIGURE_FAIL;
+      error_code = common::nvr_error_code_c::PARSE_CONFIGURE_FAIL;
       break;
     }
 
@@ -89,7 +90,7 @@ common::ErrorCode Yolov5::initContext(const std::string& json) {
     auto tpu_kernelIt =
         configure.find(CONFIG_INTERNAL_THRESHOLD_TPU_KERNEL_FIELD);
     if (configure.end() == tpu_kernelIt || !tpu_kernelIt->is_boolean()) {
-      errorCode = common::ErrorCode::PARSE_CONFIGURE_FAIL;
+      error_code = common::nvr_error_code_c::PARSE_CONFIGURE_FAIL;
       break;
     }
     mContext->use_tpu_kernel = tpu_kernelIt->get<bool>();
@@ -203,16 +204,16 @@ common::ErrorCode Yolov5::initContext(const std::string& json) {
     }
     mContext->thread_number = getThreadNumber();
   } while (false);
-  return common::ErrorCode::SUCCESS;
+  return common::nvr_error_code_c::SUCCESS;
 }
 
-common::ErrorCode Yolov5::initInternal(const std::string& json) {
-  common::ErrorCode errorCode = common::ErrorCode::SUCCESS;
+common::nvr_error_code_c Yolov5::init_internal(const std::string& json) {
+  common::nvr_error_code_c error_code = common::nvr_error_code_c::SUCCESS;
   do {
     // json是否正确
     auto configure = nlohmann::json::parse(json, nullptr, false);
     if (!configure.is_object()) {
-      errorCode = common::ErrorCode::PARSE_CONFIGURE_FAIL;
+      error_code = common::nvr_error_code_c::PARSE_CONFIGURE_FAIL;
       break;
     }
 
@@ -256,89 +257,92 @@ common::ErrorCode Yolov5::initInternal(const std::string& json) {
     mPostProcess->init(mContext);
 
   } while (false);
-  return errorCode;
+  return error_code;
 }
 
-void Yolov5::process(common::ObjectMetadatas& objectMetadatas, int dataPipeId) {
-  common::ErrorCode errorCode = common::ErrorCode::SUCCESS;
+void Yolov5::process(stream::object_meta_datas& object_meta_datas, int data_pipe_id) {
+  common::nvr_error_code_c error_code = common::nvr_error_code_c::SUCCESS;
   if (use_pre) {
-    errorCode = mPreProcess->preProcess(mContext, objectMetadatas);
-    if (common::ErrorCode::SUCCESS != errorCode) {
-      for (unsigned i = 0; i < objectMetadatas.size(); i++) {
-        objectMetadatas[i]->mErrorCode = errorCode;
+    error_code = mPreProcess->preProcess(mContext, object_meta_datas);
+    if (common::nvr_error_code_c::SUCCESS != error_code) {
+      for (unsigned i = 0; i < object_meta_datas.size(); i++) {
+        object_meta_datas[i]->m_error_code = error_code;
       }
       return;
     }
   }
   // 推理
   if (use_infer) {
-    errorCode = mInference->predict(mContext, objectMetadatas);
-    if (common::ErrorCode::SUCCESS != errorCode) {
-      for (unsigned i = 0; i < objectMetadatas.size(); i++) {
-        objectMetadatas[i]->mErrorCode = errorCode;
+    error_code = mInference->predict(mContext, object_meta_datas);
+    if (common::nvr_error_code_c::SUCCESS != error_code) {
+      for (unsigned i = 0; i < object_meta_datas.size(); i++) {
+        object_meta_datas[i]->m_error_code = error_code;
       }
       return;
     }
   }
   // 后处理
   if (use_post)
-    mPostProcess->postProcess(mContext, objectMetadatas, dataPipeId);
+    mPostProcess->postProcess(mContext, object_meta_datas, data_pipe_id);
 }
 
-common::ErrorCode Yolov5::doWork(int dataPipeId) {
-  common::ErrorCode errorCode = common::ErrorCode::SUCCESS;
+common::nvr_error_code_c Yolov5::element_do_work(int data_pipe_id) {
+  common::nvr_error_code_c error_code = common::nvr_error_code_c::SUCCESS;
 
-  common::ObjectMetadatas objectMetadatas;
-  std::vector<int> inputPorts = getInputPorts();
-  int inputPort = inputPorts[0];
-  int outputPort = 0;
-  if (!getSinkElementFlag()) {
-    std::vector<int> outputPorts = getOutputPorts();
-    outputPort = outputPorts[0];
+  stream::object_meta_datas object_meta_datas;
+  std::vector<int> input_ports = element_get_input_ports();
+  int input_port = input_ports[0];
+  int output_port = 0;
+  if (!element_get_sink_flag()) {
+    std::vector<int> output_ports = element_get_output_ports();
+    output_port = output_ports[0];
   }
 
-  common::ObjectMetadatas pendingObjectMetadatas;
+  stream::object_meta_datas pending_object_meta_datas;
 
-  while (objectMetadatas.size() < mContext->max_batch &&
-         (getThreadStatus() == ThreadStatus::RUN)) {
+  while (get_thread_status() == common::thread_status_c::RUN) {
     // 如果队列为空则等待
-    auto data = popInputData(inputPort, dataPipeId);
+    auto data = element_pop_input_data(input_port, data_pipe_id);
     if (!data) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       continue;
     }
+    auto object_meta_data =
+        std::static_pointer_cast<stream::object_meta_data_s>(data);
 
-    auto objectMetadata =
-        std::static_pointer_cast<common::ObjectMetadata>(data);
-    if (!objectMetadata->mFilter) objectMetadatas.push_back(objectMetadata);
-
-    pendingObjectMetadatas.push_back(objectMetadata);
-
-    if (objectMetadata->mFrame->mEndOfStream) {
-      break;
+    if (!object_meta_data->mFilter && 
+        object_meta_data->m_frame->m_sp_data &&
+        std::find(object_meta_data->m_skip_elements.begin(),
+            object_meta_data->m_skip_elements.end(),
+            getId()) == object_meta_data->m_skip_elements.end()) {
+      object_meta_datas.push_back(object_meta_data);
     }
+    pending_object_meta_datas.push_back(object_meta_data);
+    break;
   }
+  if (!object_meta_datas.empty()) process(object_meta_datas, data_pipe_id);
 
-  process(objectMetadatas, dataPipeId);
 
-  for (auto& objectMetadata : pendingObjectMetadatas) {
-    int channel_id_internal = objectMetadata->mFrame->mChannelIdInternal;
-    int outDataPipeId =
-        getSinkElementFlag()
-            ? 0
-            : (channel_id_internal % getOutputConnectorCapacity(outputPort));
-    errorCode = pushOutputData(outputPort, outDataPipeId,
-                               std::static_pointer_cast<void>(objectMetadata));
-    if (common::ErrorCode::SUCCESS != errorCode) {
+  for (auto& object_meta_data : pending_object_meta_datas) {
+    int channel_id_internal = object_meta_data->m_frame->m_channel_id_internal;
+    // int outDataPipeId =
+    //     element_get_sink_flag()
+    //         ? 0
+    //         : (channel_id_internal % getOutputConnectorCapacity(output_port));
+    int outDataPipeId = element_get_sink_flag() ? 0 : channel_id_internal;
+
+    error_code = element_push_output_data(output_port, outDataPipeId,
+                               std::static_pointer_cast<void>(object_meta_data));
+    if (common::nvr_error_code_c::SUCCESS != error_code) {
       IVS_WARN(
           "Send data fail, element id: {0:d}, output port: {1:d}, data: "
           "{2:p}",
-          getId(), outputPort, static_cast<void*>(objectMetadata.get()));
+          getId(), output_port, static_cast<void*>(object_meta_data.get()));
     }
   }
-  mFpsProfiler.add(objectMetadatas.size());
+  mFpsProfiler.add(object_meta_datas.size());
 
-  return common::ErrorCode::SUCCESS;
+  return common::nvr_error_code_c::SUCCESS;
 }
 
 void Yolov5::setStage(bool pre, bool infer, bool post) {
@@ -352,41 +356,31 @@ void Yolov5::initProfiler(std::string name, int interval) {
 }
 
 void Yolov5::setContext(
-    std::shared_ptr<::sophon_stream::element::Context> context) {
+    std::shared_ptr<stream_elements::Context> context) {
   // check
   mContext = std::dynamic_pointer_cast<Yolov5Context>(context);
 }
 
 void Yolov5::setPreprocess(
-    std::shared_ptr<::sophon_stream::element::PreProcess> pre) {
+    std::shared_ptr<stream_elements::PreProcess> pre) {
   mPreProcess = std::dynamic_pointer_cast<Yolov5PreProcess>(pre);
 }
 
 void Yolov5::setInference(
-    std::shared_ptr<::sophon_stream::element::Inference> infer) {
+    std::shared_ptr<stream_elements::Inference> infer) {
   mInference = std::dynamic_pointer_cast<Yolov5Inference>(infer);
 }
 
 void Yolov5::setPostprocess(
-    std::shared_ptr<::sophon_stream::element::PostProcess> post) {
+    std::shared_ptr<stream_elements::PostProcess> post) {
   mPostProcess = std::dynamic_pointer_cast<Yolov5PostProcess>(post);
-}
-
-void Yolov5::registListenFunc(
-    sophon_stream::framework::ListenThread* listener) {
-  std::string mIdStr = std::to_string(getId());
-  std::string handlerName = postNameSetConfThreshold + "/" + mIdStr;
-  listener->setHandler(handlerName.c_str(),
-                       sophon_stream::framework::RequestType::POST,
-                       std::bind(&Yolov5::listenerSetConfThreshold, this,
-                                 std::placeholders::_1, std::placeholders::_2));
 }
 
 void Yolov5::listenerSetConfThreshold(const httplib::Request& request,
                                       httplib::Response& response) {
-  common::Response resp;
-  common::RequestSingleFloat rsi;
-  common::str_to_object(request.body, rsi);
+  stream::Response resp;
+  stream::RequestSingleFloat rsi;
+  stream::str_to_object(request.body, rsi);
   mContext->thresh_conf_min = rsi.value;
   resp.code = 0;
   resp.msg = "success";
@@ -396,9 +390,10 @@ void Yolov5::listenerSetConfThreshold(const httplib::Request& request,
 }
 
 REGISTER_WORKER("yolov5", Yolov5)
-REGISTER_GROUP_WORKER("yolov5_group", sophon_stream::framework::Group<Yolov5>,
+REGISTER_GROUP_WORKER("yolov5_group", stream::group_c<Yolov5>,
                       Yolov5)
 
 }  // namespace yolov5
-}  // namespace element
-}  // namespace sophon_stream
+}  //namespace stream_elements
+}  //namespace backend
+}  //namespace nvr_edge

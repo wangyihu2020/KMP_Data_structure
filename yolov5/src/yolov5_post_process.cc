@@ -9,8 +9,9 @@
 
 #include "yolov5_post_process.h"
 
-namespace sophon_stream {
-namespace element {
+namespace nvr_edge {
+namespace backend {
+namespace stream_elements {
 namespace yolov5 {
 
 void Yolov5PostProcess::init(std::shared_ptr<Yolov5Context> context) {
@@ -134,18 +135,18 @@ void Yolov5PostProcess::NMS(YoloV5BoxVec& dets, float nmsConfidence) {
 
 void Yolov5PostProcess::setTpuKernelMem(
     std::shared_ptr<Yolov5Context> context,
-    common::ObjectMetadatas& objectMetadatas, tpu_kernel& tpu_k) {
-  if (objectMetadatas[0]->mFrame->mEndOfStream) return;
-  int input_num = objectMetadatas[0]->mOutputBMtensors->tensors.size();  // 3
+    stream::object_meta_datas& object_meta_datas, tpu_kernel& tpu_k) {
+  if (object_meta_datas[0]->m_frame->mEndOfStream) return;
+  int input_num = object_meta_datas[0]->mOutputBMtensors->tensors.size();  // 3
 
   std::vector<std::vector<std::shared_ptr<bm_device_mem_t>>> in_dev_mems(
       context->max_batch,
       std::vector<std::shared_ptr<bm_device_mem_t>>(input_num));
   for (int batch_idx = 0; batch_idx < context->max_batch; ++batch_idx) {
-    if (objectMetadatas[batch_idx]->mFrame->mEndOfStream) break;
+    if (object_meta_datas[batch_idx]->m_frame->mEndOfStream) break;
     for (int i = 0; i < input_num; i++)
       in_dev_mems[batch_idx][i] = std::make_shared<bm_device_mem_t>(
-          objectMetadatas[batch_idx]->mOutputBMtensors->tensors[i]->device_mem);
+          object_meta_datas[batch_idx]->mOutputBMtensors->tensors[i]->device_mem);
     for (int j = 0; j < input_num; ++j) {
       tpu_k.api[batch_idx].bottom_addr[j] =
           bm_mem_get_device_addr(*in_dev_mems[batch_idx][j]);
@@ -168,24 +169,24 @@ void Yolov5PostProcess::setTpuKernelMem(
 }
 
 void Yolov5PostProcess::postProcess(std::shared_ptr<Yolov5Context> context,
-                                    common::ObjectMetadatas& objectMetadatas,
-                                    int dataPipeId) {
-  if (objectMetadatas.size() == 0) return;
+                                    stream::object_meta_datas& object_meta_datas,
+                                    int data_pipe_id) {
+  if (object_meta_datas.size() == 0) return;
   if (context->use_tpu_kernel) {
-    postProcessTPUKERNEL(context, objectMetadatas, dataPipeId);
+    postProcessTPUKERNEL(context, object_meta_datas, data_pipe_id);
   } else {
-    postProcessCPU(context, objectMetadatas);
+    postProcessCPU(context, object_meta_datas);
   }
 }
 
 void Yolov5PostProcess::postProcessTPUKERNEL(
     std::shared_ptr<Yolov5Context> context,
-    common::ObjectMetadatas& objectMetadatas, int dataPipeId) {
-  tpu_kernel& tpu_k = multi_thread_tpu_kernel[dataPipeId];
-  setTpuKernelMem(context, objectMetadatas, tpu_k);
+    stream::object_meta_datas& object_meta_datas, int data_pipe_id) {
+  tpu_kernel& tpu_k = multi_thread_tpu_kernel[data_pipe_id];
+  setTpuKernelMem(context, object_meta_datas, tpu_k);
   for (int i = 0; i < context->max_batch; i++) {
-    if (objectMetadatas[i]->mFrame->mEndOfStream) break;
-    bm_image image = *objectMetadatas[i]->mFrame->mSpData;
+    if (object_meta_datas[i]->m_frame->mEndOfStream) break;
+    bm_image image = *object_meta_datas[i]->m_frame->m_sp_data;
     int tx1 = 0, ty1 = 0;
 #if USE_ASPECT_RATIO
     bool isAlignWidth = false;
@@ -246,8 +247,8 @@ void Yolov5PostProcess::postProcessTPUKERNEL(
       temp_bbox.x = std::max(int(centerX - temp_bbox.width / 2), 0);
       temp_bbox.y = std::max(int(centerY - temp_bbox.height / 2), 0);
 
-      std::shared_ptr<common::DetectedObjectMetadata> detData =
-          std::make_shared<common::DetectedObjectMetadata>();
+      std::shared_ptr<stream::detected_object_meta_datas_s> detData =
+          std::make_shared<stream::detected_object_meta_datas_s>();
       detData->mBox.mX = temp_bbox.x;
       detData->mBox.mY = temp_bbox.y;
       detData->mBox.mWidth = temp_bbox.width;
@@ -262,19 +263,19 @@ void Yolov5PostProcess::postProcessTPUKERNEL(
           detData->mBox.mHeight > context->m_min_det &&
           detData->mBox.mWidth < context->m_max_det &&
           detData->mBox.mHeight < context->m_max_det)
-        objectMetadatas[i]->mDetectedObjectMetadatas.push_back(detData);
+        object_meta_datas[i]->m_detected_object_meta_datas.push_back(detData);
     }
   }
 }
 
 void Yolov5PostProcess::postProcessCPU(
     std::shared_ptr<Yolov5Context> context,
-    common::ObjectMetadatas& objectMetadatas) {
-  if (objectMetadatas.size() == 0) return;
+    stream::object_meta_datas& object_meta_datas) {
+  if (object_meta_datas.size() == 0) return;
   YoloV5BoxVec yolobox_vec;
   int idx = 0;
-  for (auto obj : objectMetadatas) {
-    if (obj->mFrame->mEndOfStream) break;
+  for (auto obj : object_meta_datas) {
+    if (obj->m_frame->mEndOfStream) break;
     std::vector<std::shared_ptr<BMNNTensor>> outputTensors(context->output_num);
     for (int i = 0; i < context->output_num; i++) {
       outputTensors[i] = std::make_shared<BMNNTensor>(
@@ -285,8 +286,8 @@ void Yolov5PostProcess::postProcessCPU(
     }
 
     yolobox_vec.clear();
-    int frame_width = obj->mFrame->mSpData->width;
-    int frame_height = obj->mFrame->mSpData->height;
+    int frame_width = obj->m_frame->m_sp_data->width;
+    int frame_height = obj->m_frame->m_sp_data->height;
 
     int tx1 = 0, ty1 = 0;
 #if USE_ASPECT_RATIO
@@ -544,8 +545,8 @@ void Yolov5PostProcess::postProcessCPU(
       }
 
     for (auto bbox : yolobox_vec) {
-      std::shared_ptr<common::DetectedObjectMetadata> detData =
-          std::make_shared<common::DetectedObjectMetadata>();
+      std::shared_ptr<stream::detected_object_meta_datas_s> detData =
+          std::make_shared<stream::detected_object_meta_datas_s>();
       detData->mBox.mX = bbox.x;
       detData->mBox.mY = bbox.y;
       detData->mBox.mWidth = bbox.width;
@@ -565,12 +566,13 @@ void Yolov5PostProcess::postProcessCPU(
           detData->mBox.mHeight > context->m_min_det &&
           detData->mBox.mWidth < context->m_max_det &&
           detData->mBox.mHeight < context->m_max_det)
-        obj->mDetectedObjectMetadatas.push_back(detData);
+        obj->m_detected_object_meta_datas.push_back(detData);
     }
     ++idx;
   }
 }
 
 }  // namespace yolov5
-}  // namespace element
-}  // namespace sophon_stream
+}  //namespace stream_elements
+}  //namespace backend
+}  //namespace nvr_edge

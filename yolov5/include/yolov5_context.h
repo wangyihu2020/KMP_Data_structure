@@ -12,8 +12,9 @@
 
 #include "algorithmApi/context.h"
 
-namespace sophon_stream {
-namespace element {
+namespace nvr_edge {
+namespace backend {
+namespace stream_elements {
 namespace yolov5 {
 
 #define USE_ASPECT_RATIO 1
@@ -41,7 +42,7 @@ typedef struct {
 
 #define MAX_BATCH 16
 
-class Yolov5Context : public ::sophon_stream::element::Context {
+class Yolov5Context : public stream_elements::Context {
  public:
   int deviceId;  // 设备ID
 
@@ -86,7 +87,8 @@ class Yolov5Context : public ::sophon_stream::element::Context {
   unsigned int m_max_det = UINT_MAX, m_min_det = 0;
 };
 }  // namespace yolov5
-}  // namespace element
-}  // namespace sophon_stream
+}  //namespace stream_elements
+}  //namespace backend
+}  //namespace nvr_edge
 
 #endif  // SOPHON_STREAM_ELEMENT_YOLOV5_CONTEXT_H_

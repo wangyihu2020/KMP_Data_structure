@@ -13,19 +13,21 @@
 #include "algorithmApi/pre_process.h"
 #include "yolov5_context.h"
 
-namespace sophon_stream {
-namespace element {
+namespace nvr_edge {
+namespace backend {
+namespace stream_elements {
 namespace yolov5 {
 
-class Yolov5PreProcess : public ::sophon_stream::element::PreProcess {
+class Yolov5PreProcess : public stream_elements::PreProcess {
  public:
-  common::ErrorCode preProcess(std::shared_ptr<Yolov5Context> context,
-                               common::ObjectMetadatas& objectMetadatas);
+  common::nvr_error_code_c preProcess(std::shared_ptr<Yolov5Context> context,
+                               stream::object_meta_datas& object_meta_datas);
   void init(std::shared_ptr<Yolov5Context> context);
 };
 
 }  // namespace yolov5
-}  // namespace element
-}  // namespace sophon_stream
+}  //namespace stream_elements
+}  //namespace backend
+}  //namespace nvr_edge
 
 #endif  // SOPHON_STREAM_ELEMENT_YOLOV5_PRE_PROCESS_H_

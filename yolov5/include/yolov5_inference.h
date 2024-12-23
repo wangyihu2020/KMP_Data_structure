@@ -13,11 +13,12 @@
 #include "algorithmApi/inference.h"
 #include "yolov5_context.h"
 
-namespace sophon_stream {
-namespace element {
+namespace nvr_edge {
+namespace backend {
+namespace stream_elements {
 namespace yolov5 {
 
-class Yolov5Inference : public ::sophon_stream::element::Inference {
+class Yolov5Inference : public stream_elements::Inference {
  public:
   ~Yolov5Inference() override;
   /**
@@ -30,14 +31,15 @@ class Yolov5Inference : public ::sophon_stream::element::Inference {
    * network predict output
    * @param[in] context: inputData and outputData
    */
-  common::ErrorCode predict(std::shared_ptr<Yolov5Context> context,
-                            common::ObjectMetadatas& objectMetadatas);
+  common::nvr_error_code_c predict(std::shared_ptr<Yolov5Context> context,
+                            stream::object_meta_datas& object_meta_datas);
 
  private:
 };
 
 }  // namespace yolov5
-}  // namespace element
-}  // namespace sophon_stream
+}  //namespace stream_elements
+}  //namespace backend
+}  //namespace nvr_edge
 
 #endif  // SOPHON_STREAM_ELEMENT_YOLOV5_INFERENCE_H_

@@ -9,21 +9,22 @@
 
 #include "yolov5_inference.h"
 
-namespace sophon_stream {
-namespace element {
+namespace nvr_edge {
+namespace backend {
+namespace stream_elements {
 namespace yolov5 {
 
 Yolov5Inference::~Yolov5Inference() {}
 
 void Yolov5Inference::init(std::shared_ptr<Yolov5Context> context) {}
 
-common::ErrorCode Yolov5Inference::predict(
+common::nvr_error_code_c Yolov5Inference::predict(
     std::shared_ptr<Yolov5Context> context,
-    common::ObjectMetadatas& objectMetadatas) {
-  if (objectMetadatas.size() == 0) return common::ErrorCode::SUCCESS;
+    stream::object_meta_datas& object_meta_datas) {
+  if (object_meta_datas.size() == 0) return common::nvr_error_code_c::SUCCESS;
 
   if (context->max_batch > 1) {
-    auto inputTensors = mergeInputDeviceMem(context, objectMetadatas);
+    auto inputTensors = mergeInputDeviceMem(context, object_meta_datas);
     auto outputTensors = getOutputDeviceMem(context);
 
     int ret = 0;
@@ -35,29 +36,30 @@ common::ErrorCode Yolov5Inference::predict(
                                       outputTensors->tensors);
 #endif
 
-    splitOutputMemIntoObjectMetadatas(context, objectMetadatas, outputTensors);
+    splitOutputMemIntoobject_meta_datas(context, object_meta_datas, outputTensors);
   } else {
-    if (objectMetadatas[0]->mFrame->mEndOfStream)
-      return common::ErrorCode::SUCCESS;
-    objectMetadatas[0]->mOutputBMtensors = getOutputDeviceMem(context);
+    if (object_meta_datas[0]->m_frame->mEndOfStream)
+      return common::nvr_error_code_c::SUCCESS;
+    object_meta_datas[0]->mOutputBMtensors = getOutputDeviceMem(context);
 #if BMCV_VERSION_MAJOR > 1
     int ret = context->bmNetwork->forward<false>(
-        objectMetadatas[0]->mInputBMtensors->tensors,
-        objectMetadatas[0]->mOutputBMtensors->tensors);
+        object_meta_datas[0]->mInputBMtensors->tensors,
+        object_meta_datas[0]->mOutputBMtensors->tensors);
 #else
     int ret = context->bmNetwork->forward(
-        objectMetadatas[0]->mInputBMtensors->tensors,
-        objectMetadatas[0]->mOutputBMtensors->tensors);
+        object_meta_datas[0]->mInputBMtensors->tensors,
+        object_meta_datas[0]->mOutputBMtensors->tensors);
 #endif
   }
 
-  for (auto obj : objectMetadatas) {
+  for (auto obj : object_meta_datas) {
     obj->mInputBMtensors = nullptr;
   }
 
-  return common::ErrorCode::SUCCESS;
+  return common::nvr_error_code_c::SUCCESS;
 }
 
 }  // namespace yolov5
-}  // namespace element
-}  // namespace sophon_stream
+}  //namespace stream_elements
+}  //namespace backend
+}  //namespace nvr_edge

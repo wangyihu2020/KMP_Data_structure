@@ -9,25 +9,26 @@
 
 #include "yolov5_pre_process.h"
 
-namespace sophon_stream {
-namespace element {
+namespace nvr_edge {
+namespace backend {
+namespace stream_elements {
 namespace yolov5 {
 
 void Yolov5PreProcess::init(std::shared_ptr<Yolov5Context> context) {}
 
-common::ErrorCode Yolov5PreProcess::preProcess(
+common::nvr_error_code_c Yolov5PreProcess::preProcess(
     std::shared_ptr<Yolov5Context> context,
-    common::ObjectMetadatas& objectMetadatas) {
-  if (objectMetadatas.size() == 0) return common::ErrorCode::SUCCESS;
-  initTensors(context, objectMetadatas);
+    stream::object_meta_datas& object_meta_datas) {
+  if (object_meta_datas.size() == 0) return common::nvr_error_code_c::SUCCESS;
+  initTensors(context, object_meta_datas);
 
   auto jsonPlanner = context->bgr2rgb ? FORMAT_RGB_PLANAR : FORMAT_BGR_PLANAR;
   int i = 0;
-  for (auto& objMetadata : objectMetadatas) {
-    if (objMetadata->mFrame->mSpData == nullptr) continue;
+  for (auto& objMetadata : object_meta_datas) {
+    if (objMetadata->m_frame->m_sp_data == nullptr) continue;
     bm_image resized_img;
     bm_image converto_img;
-    bm_image image0 = *objMetadata->mFrame->mSpData;
+    bm_image image0 = *objMetadata->m_frame->m_sp_data;
     bm_image image1;
     // convert to RGB_PLANAR
     if (image0.image_format != jsonPlanner) {
@@ -156,14 +157,15 @@ common::ErrorCode Yolov5PreProcess::preProcess(
 
     bm_image_get_device_mem(
         converto_img,
-        &objectMetadatas[i]->mInputBMtensors->tensors[0]->device_mem);
+        &object_meta_datas[i]->mInputBMtensors->tensors[0]->device_mem);
     bm_image_detach(converto_img);
     bm_image_destroy(converto_img);
     i++;
   }
-  return common::ErrorCode::SUCCESS;
+  return common::nvr_error_code_c::SUCCESS;
 }
 
 }  // namespace yolov5
-}  // namespace element
-}  // namespace sophon_stream
+}  //namespace stream_elements
+}  //namespace backend
+}  //namespace nvr_edge
